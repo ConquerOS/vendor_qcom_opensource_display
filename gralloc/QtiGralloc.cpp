@@ -30,6 +30,8 @@
 #include "QtiGralloc.h"
 
 #include <log/log.h>
+#include "color_extensions.h"
+
 namespace qtigralloc {
 
 using android::hardware::graphics::mapper::V4_0::IMapper;
@@ -164,6 +166,23 @@ Error encodeVideoHistogramMetadata(VideoHistogramMetadata &in, hidl_vec<uint8_t>
   return Error::NONE;
 }
 
+Error decodeVideoTranscodeStatsMetadata(hidl_vec<uint8_t> &in, VideoTranscodeStatsMetadata *out) {
+  if (!in.size() || !out) {
+    return Error::BAD_VALUE;
+  }
+  memcpy(out, in.data(), sizeof(VideoTranscodeStatsMetadata));
+  return Error::NONE;
+}
+
+Error encodeVideoTranscodeStatsMetadata(VideoTranscodeStatsMetadata &in, hidl_vec<uint8_t> *out) {
+  if (!out) {
+    return Error::BAD_VALUE;
+  }
+  out->resize(sizeof(VideoTranscodeStatsMetadata));
+  memcpy(out->data(), &in, sizeof(VideoTranscodeStatsMetadata));
+  return Error::NONE;
+}
+
 Error decodeVideoTimestampInfo(hidl_vec<uint8_t> &in, VideoTimestampInfo *out) {
   if (!in.size() || !out) {
     return Error::BAD_VALUE;
@@ -199,6 +218,38 @@ Error encodeYUVPlaneInfoMetadata(qti_ycbcr *in, hidl_vec<uint8_t> *out) {
   return Error::NONE;
 }
 
+Error decodeCustomContentMetadata(hidl_vec<uint8_t> &in, void *out) {
+  static size_t target_size = sizeof(CustomContentMetadata);
+
+  if (in.size() != target_size || !out) {
+    return Error::BAD_VALUE;
+  }
+
+  CustomContentMetadata *c_md_in = reinterpret_cast<CustomContentMetadata *>(in.data());
+  CustomContentMetadata *c_md_out = reinterpret_cast<CustomContentMetadata *>(out);
+
+  if (c_md_in->size > CUSTOM_METADATA_SIZE_BYTES) {
+    return Error::BAD_VALUE;
+  }
+
+  c_md_out->size = c_md_in->size;
+  memcpy(c_md_out->metadataPayload, c_md_in->metadataPayload, c_md_in->size);
+  return Error::NONE;
+}
+
+Error encodeCustomContentMetadata(const void *in, hidl_vec<uint8_t> *out) {
+  static size_t target_size = sizeof(CustomContentMetadata);
+
+  if (!in || !out) {
+    return Error::BAD_VALUE;
+  }
+
+  out->resize(target_size);
+
+  memcpy(out->data(), in, target_size);
+  return Error::NONE;
+}
+
 MetadataType getMetadataType(uint32_t in) {
   switch (in) {
     case QTI_VT_TIMESTAMP:
@@ -225,6 +276,8 @@ MetadataType getMetadataType(uint32_t in) {
       return MetadataType_CVPMetadata;
     case QTI_VIDEO_HISTOGRAM_STATS:
       return MetadataType_VideoHistogramStats;
+    case QTI_VIDEO_TRANSCODE_STATS:
+      return MetadataType_VideoTranscodeStats;
     case QTI_VIDEO_TS_INFO:
       return MetadataType_VideoTimestampInfo;
     case QTI_FD:
@@ -251,6 +304,10 @@ MetadataType getMetadataType(uint32_t in) {
       return MetadataType_ColorSpace;
     case QTI_YUV_PLANE_INFO:
       return MetadataType_YuvPlaneInfo;
+    case QTI_TIMED_RENDERING:
+      return MetadataType_TimedRendering;
+    case QTI_CUSTOM_CONTENT_METADATA:
+      return MetadataType_CustomContentMetadata;
     default:
       return MetadataType_Invalid;
   }
@@ -324,6 +381,10 @@ Error get(void *buffer, uint32_t type, void *param) {
       err = decodeVideoHistogramMetadata(bytestream,
                                          reinterpret_cast<VideoHistogramMetadata *>(param));
       break;
+    case QTI_VIDEO_TRANSCODE_STATS:
+      err = decodeVideoTranscodeStatsMetadata(bytestream,
+                                   reinterpret_cast<VideoTranscodeStatsMetadata *>(param));
+      break;
     case QTI_VIDEO_TS_INFO:
       err = decodeVideoTimestampInfo(bytestream, reinterpret_cast<VideoTimestampInfo *>(param));
       break;
@@ -374,6 +435,13 @@ Error get(void *buffer, uint32_t type, void *param) {
       break;
     case QTI_YUV_PLANE_INFO:
       err = decodeYUVPlaneInfoMetadata(bytestream, reinterpret_cast<qti_ycbcr *>(param));
+      break;
+    case QTI_TIMED_RENDERING:
+      err = static_cast<Error>(android::gralloc4::decodeUint32(
+          qtigralloc::MetadataType_TimedRendering, bytestream, reinterpret_cast<uint32_t *>(param)));
+      break;
+    case QTI_CUSTOM_CONTENT_METADATA:
+      err = decodeCustomContentMetadata(bytestream, param);
       break;
     default:
       param = nullptr;
@@ -443,8 +511,20 @@ Error set(void *buffer, uint32_t type, void *param) {
       err = encodeVideoHistogramMetadata(*reinterpret_cast<VideoHistogramMetadata *>(param),
                                          &bytestream);
       break;
+    case QTI_VIDEO_TRANSCODE_STATS:
+      err = encodeVideoTranscodeStatsMetadata(
+            *reinterpret_cast<VideoTranscodeStatsMetadata *>(param), &bytestream);
+      break;
     case QTI_VIDEO_TS_INFO:
       err = encodeVideoTimestampInfo(*reinterpret_cast<VideoTimestampInfo *>(param), &bytestream);
+      break;
+    case QTI_TIMED_RENDERING:
+      err = static_cast<Error>(
+          android::gralloc4::encodeUint32(qtigralloc::MetadataType_TimedRendering,
+                                          *reinterpret_cast<uint32_t *>(param), &bytestream));
+      break;
+    case QTI_CUSTOM_CONTENT_METADATA:
+      err = encodeCustomContentMetadata(param, &bytestream);
       break;
     default:
       param = nullptr;
